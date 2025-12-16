@@ -42,6 +42,7 @@ genai-prices==0.0.47
 google-auth==2.43.0
 google-genai==1.54.0
 googleapis-common-protos==1.72.0
+graphviz==0.21
 griffe==1.15.0
 groq==0.37.1
 h11==0.16.0

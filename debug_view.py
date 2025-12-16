@@ -45,12 +45,23 @@ def print_nodes(mem) -> None:
 
 def print_splits_from_trace(mem) -> None:
     """
-    Print split events from mem.trace (requires you log split_done with sub_intents).
+    Print split events with parent intent text.
     """
     print("\n=== SPLITS (from trace) ===\n")
+
     for ev in getattr(mem, "trace", []):
-        if getattr(ev, "event", None) == "split_done":
-            subs = (getattr(ev, "payload", {}) or {}).get("sub_intents", [])
-            print(f"- node_id={getattr(ev, 'node_id', None)} split into {len(subs)} intents:")
-            for s in subs:
-                print(f"  • {s}")
+        if ev.event != "split_done":
+            continue
+
+        node_id = ev.node_id
+        parent_text = (
+            mem.nodes[node_id].text
+            if node_id in mem.nodes
+            else "<unknown intent>"
+        )
+
+        subs = (ev.payload or {}).get("sub_intents", [])
+
+        print(f'- "{parent_text}" split into {len(subs)} intents:')
+        for s in subs:
+            print(f"  • {s}")

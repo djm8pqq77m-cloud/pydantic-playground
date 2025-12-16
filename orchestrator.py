@@ -83,6 +83,7 @@ async def run_orchestrator(
             continue
 
         sub_intents = (await splitter_agent.run(node.text)).output
+        sub_intents = sub_intents[:3]
         node.status = NodeStatus.SPLIT
         mem.log("split_done", node_id, sub_intents=sub_intents)
 
