@@ -1,57 +1,107 @@
-import config
-
+from pydantic import BaseModel, Field
 from pydantic_ai import Agent
-from tools import web_search
-from pydantic_ai.usage import UsageLimits
+
+from models import *
 
 
-from models import AgentAnswer
 
 
-agent = Agent(
+splitter_agent = Agent(
     "openai:gpt-4o-mini",
-    output_type=AgentAnswer,
-    instructions=
-    """
-    Pour cette requête :
+    output_type=list[str],
+    system_prompt=(
+        """
+        Split a user request into actionable sub-intents.
 
-    - Structure ta réponse avec sections si utile.
-    - Termine par un résumé de 2 phrases.
-    - Ton ton doit être empathique.
+        Goal:
+          Produce a SMALL list (2 to 5) of specific, independently solvable sub-intents.
 
-    Production attendue (AgentAnswer) :
-    - final_answer : réponse finale claire.
-    - tool_calls : nombre total d appels de tools.
-    - web_search_history : une entrée par appel web_search :
-        - query envoyée
-        - answer retournée par Tavily
-        - sources principales
-        - used_for = rôle de cette recherche
+        Rules:
+          - Each sub-intent must be concrete and directly searchable/answerable.
+          - Avoid vague items like "research more" or "learn about X".
+          - Preserve key constraints (time window, location, entity names).
+          - Do NOT add commentary.
 
-    Si aucun appel web_search → web_search_history = [].
-    """,
-    system_prompt = """
-    Tu es un assistant fiable et précis.
-
-    Principes :
-    - Réponses claires, concises, factuelles.
-    - Ne jamais inventer : si incertain → dis-le.
-    - Utilise le tool `web_search` pour toute info factuelle, récente ou à vérifier.
-
-    Stratégie :
-    - Découpe les questions complexes en sous-problèmes.
-    - Tu peux appeler `web_search` jusqu à 5 fois si nécessaire.
-    - Minimise le nombre d appels.
-
-    Style :
-    - Explications logiques, sans remplissage.
-    """,
-    tools=[web_search],
-    name="Deep Search"
+        Output:
+          Return ONLY a JSON array of strings (no extra text).
+        """
+    ).strip(),
 )
 
+estimator_agent = Agent(
+    "openai:gpt-4o-mini",
+    output_type=EstimatorDecision,
+    system_prompt=(
+        """
+        Decide how to route a single intent.
 
-    
+        Actions:
+          - done: Answerable reliably without web browsing.
+          - search: ONE focused web query is sufficient.
+          - resplit: Decompose into 2 to 5 sub-intents.
 
-    
+        Use 'resplit' when:
+          - Multiple distinct aspects are requested (e.g., list + explain, compare across dimensions).
+          - A time window (today/current/last X) exists AND more than one thing is asked.
+          - More than one web query would be needed.
+          - Scope/criteria are unclear (missing entity/time/location/constraints).
 
+        Use 'search' only when:
+          - The intent is single-aspect and well-scoped.
+          - The query includes key constraints (time window/location/entity).
+
+        Use 'done' only when:
+          - The answer is stable/common knowledge and not dependent on recent facts.
+
+        Output:
+          Return valid EstimatorDecision JSON:
+            - action: one of ["done","search","resplit"]
+            - reason: one short sentence
+            - query: REQUIRED if action="search", else null
+            - specificity_score: float in [0.0, 1.0]
+        """
+    ).strip(),
+)
+
+answerer_agent = Agent(
+    "openai:gpt-4o",
+    output_type=str,
+    system_prompt=(
+        """
+        Answer an intent without web browsing.
+
+        Rules:
+          - Be concise and accurate.
+          - If critical information is missing or likely time-sensitive, say what is missing.
+          - Do NOT fabricate citations or exact figures.
+
+        Output:
+          Return plain text only.
+        """
+    ).strip(),
+)
+
+composer_agent = Agent(
+    "openai:gpt-4o",
+    output_type=FinalAnswer,
+    system_prompt=(
+        """
+        Compose the final response from evidence.
+
+        Inputs:
+          - user_question
+          - evidence: a list of items where each item has:
+              - intent
+              - either 'answer' (no-web) OR 'web' (WebSearchResult with sources)
+
+        Rules:
+          - Answer the user's question directly and structure the response clearly.
+          - Prefer evidence.web.answer when present; if missing, rely on evidence.web.sources[*].snippet.
+          - If evidence is incomplete, state what is missing (do not guess).
+          - Include a short "Sources" section with bullet-point URLs when sources exist.
+
+        Output:
+          Return FinalAnswer JSON: {"answer": "..."} (no extra keys).
+        """
+    ).strip(),
+)

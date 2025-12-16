@@ -1,106 +1,155 @@
-# 🧠 Pydantic AI – Agent + Tools Starter
+# PydanticAI Intent Orchestrator
 
-Ce projet illustre une architecture propre pour construire un agent intelligent avec **Pydantic AI**,  
-des **tools personnalisés**, et une **réponse finale structurée** grâce aux modèles Pydantic.
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](#)
+[![Pydantic](https://img.shields.io/badge/Pydantic-v2-green)](#)
+[![PydanticAI](https://img.shields.io/badge/PydanticAI-enabled-purple)](#)
 
----
+A minimal **code-driven** orchestrator that builds an intent tree and (optionally) uses web search for up-to-date answers.
 
-## 📁 Structure du projet
-
-```
-project/
-├── agents.py        # Définition des agents : prompts, result_type, tools connectés
-├── tools.py         # Définition des tools (@tool) utilisés par l’agent
-├── models.py        # Modèles Pydantic (AgentAnswer, ToolCall, etc.)
-└── main.py          # Point d’entrée : exécution de l’agent
-```
-
-### 🔹 `tools.py`  
-Contient **uniquement** les tools (fonctions Python décorées par `@tool`) :
-
-- Chaque tool représente une **capacité externe** accessible à l’agent  
-  (recherche web, calcul, accès fichier, API externe…).
-- La **docstring** décrit ce que fait le tool.
-- Le LLM **lit cette docstring** pour comprendre comment utiliser l’outil.
+- Orchestrator = deterministic Python (not an LLM)
+- Specialized LLM agents: split → estimate → answer → compose
+- Debuggable state via `Memory` (nodes, stack, trace)
 
 ---
 
-### 🔹 `models.py`  
-Définit les modèles Pydantic utilisés pour :
+## What this is
 
-- structurer la réponse finale de l’agent (`AgentAnswer`)
-- éventuellement structurer la sortie des tools (`ToolCall`, `WebSearchResult`, etc.)
+This project implements a small orchestration loop:
 
-Un exemple typique :
+1. **Splitter** proposes 2–5 actionable sub-intents when an intent is too broad.
+2. **Estimator** routes each intent to one action:
+   - `done` (answer without web),
+   - `search` (one focused web query),
+   - `resplit` (split into sub-intents).
+3. **Web search** (Tavily) fetches recent facts and sources when needed.
+4. **Composer** synthesizes a final answer from collected evidence.
 
-```python
-class AgentAnswer(BaseModel):
-    final_answer: str
-    tool_calls: int
-    reasoning_summary: str | None = None
-```
-
-Ce modèle sert :
-
-- de **result_type** dans Pydantic AI  
-- de **response_model** dans FastAPI si on expose l’agent via une API
+The orchestrator itself is plain Python code so execution stays deterministic, bounded, and easy to debug.
 
 ---
 
-### 🔹 `agents.py`  
-Fichier principal où l’on construit l’agent :
+## Project layout
 
-- choix du modèle (`gpt-4o-mini`, etc.)
-- connexion des tools
-- définition du `result_type`
-- écriture du **system_prompt**, qui donne au LLM les règles de comportement
-
-Exemples de règles dans le prompt :
-
-- quand utiliser un tool  
-- possibilité d’en appeler plusieurs  
-- comment combiner les résultats  
-- comment structurer la réponse finale
-
----
-
-### 🔹 `main.py`  
-Point d’entrée de l’application.  
-Tu exécutes l’agent ici :
-
-```python
-from agents import agent
-
-result = agent.run_sync("Explique-moi ce qu'est le surapprentissage.")
-print(result.output)
+```text
+.
+├── main.py           # CLI entrypoint
+├── orchestrator.py   # orchestration loop (deterministic)
+├── agents.py         # PydanticAI agents (split/estimate/answer/compose)
+├── models.py         # Pydantic models (Memory, IntentNode, Evidence, etc.)
+├── web_search.py     # Tavily integration (returns WebSearchResult)
+└── debug_view.py     # pretty-print Memory (nodes + trace)
 ```
 
+---
 
-## 🔧 Fonctionnement général
+## Requirements
 
-1. L’utilisateur fournit une requête  
-2. L’agent analyse la question  
-3. S’il manque d’information, il peut appeler un **tool**  
-4. Il peut appeler ce tool **plusieurs fois** jusqu’à ce qu’il estime avoir assez d’éléments  
-5. Il génère une **réponse finale structurée** conforme à `AgentAnswer`
+- Python 3.10+ recommended
+- `pydantic` (v2)
+- `pydantic-ai`
+- A model provider key (e.g., OpenAI)
+- Tavily key if you enable web search
 
 ---
 
-## 🧠 Rôles respectifs
+## Setup
 
-| Élément | Rôle |
-|--------|------|
-| **tools.py** | Déclare les outils utilisables par le LLM |
-| **models.py** | Structure les données échangées |
-| **agents.py** | Configure le cerveau : modèle, tools, règles (system_prompt) |
-| **main.py** | Exécute l’agent : test / API / interface |
+### Install dependencies
 
--
+```bash
+pip install -r requirements.txt
+```
 
+### Environment variables
 
-## 🚀 Pour lancer
+```bash
+export OPENAI_API_KEY="..."
+export TAVILY_API_KEY="..."   # required if using Tavily web search
+```
+
+---
+
+## Run
 
 ```bash
 python main.py
 ```
 
+You will be prompted:
+
+```text
+Your question:
+```
+
+---
+
+## How it works (core concepts)
+
+### IntentNode fields
+
+- `text` = human-readable intent (LLM-facing)
+- `search_query` = search-engine query (produced by the estimator)
+- `web_result` = structured search output (`WebSearchResult`)
+- `answer` = resolved answer (web summary or no-web answerer)
+- `status` = `PENDING | SPLIT | SEARCHED | DONE | FAILED`
+
+### Memory (state)
+
+- `mem.nodes` = all nodes created (the intent tree)
+- `mem.stack` = node IDs left to process (DFS via `.pop()`)
+- `mem.trace` = logs (decisions, searches, splits)
+
+---
+
+## Configuration
+
+Tune `OrchestratorConfig`:
+
+- `max_nodes`: cap processed nodes (prevents runaway splitting)
+- `max_depth`: cap split depth
+- `max_searches`: cap web calls (controls cost)
+
+---
+
+## Debugging
+
+Use debug mode to inspect internal state (nodes, queries, statuses, decisions, splits).
+
+Recommended trace events:
+
+- `received_prompt`
+- `estimator_decision`
+- `search_start` / `search_done` / `search_error`
+- `split_done` (include `sub_intents`)
+- `final_synthesized`
+
+---
+
+## Troubleshooting
+
+### Markdown does not render on GitHub
+
+Make sure the file is named **`README.md`** (not `README.me`) and you did not wrap the whole file in triple backticks.
+
+### It never splits
+
+Your estimator may be too “search-first”. Use multi-aspect prompts (compare + pricing + constraints) or tighten the estimator prompt to prefer `resplit` for multi-aspect intents.
+
+### Web search feels slow or blocks
+
+If your Tavily client is synchronous, wrap the call with `asyncio.to_thread(...)` inside `web_search.py` so it does not block the event loop.
+
+### Empty web summary
+
+Some searches return no synthetic summary. The composer should then rely on `sources[*].snippet` and URLs.
+
+---
+
+## Good test questions
+
+- Split + web:
+  - Compare Tavily vs SerpAPI vs Brave Search API: pricing, rate limits, Python integration, pros/cons. Provide sources.
+- Local/time-sensitive:
+  - Find 5 coworking spaces in Shoreditch with day passes under £25, open after 8pm, include links.
+- Recent updates:
+  - What changed in PydanticAI in the last 90 days? Provide sources.
