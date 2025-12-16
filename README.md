@@ -67,21 +67,6 @@ export OPENAI_API_KEY="..."
 export TAVILY_API_KEY="..."   # required if using Tavily web search
 ```
 
----
-
-## Run
-
-```bash
-python main.py
-```
-
-You will be prompted:
-
-```text
-Your question:
-```
-
----
 
 ## How it works (core concepts)
 
@@ -123,27 +108,7 @@ Recommended trace events:
 - `split_done` (include `sub_intents`)
 - `final_synthesized`
 
----
-
-## Troubleshooting
-
-### Markdown does not render on GitHub
-
-Make sure the file is named **`README.md`** (not `README.me`) and you did not wrap the whole file in triple backticks.
-
-### It never splits
-
-Your estimator may be too “search-first”. Use multi-aspect prompts (compare + pricing + constraints) or tighten the estimator prompt to prefer `resplit` for multi-aspect intents.
-
-### Web search feels slow or blocks
-
-If your Tavily client is synchronous, wrap the call with `asyncio.to_thread(...)` inside `web_search.py` so it does not block the event loop.
-
-### Empty web summary
-
-Some searches return no synthetic summary. The composer should then rely on `sources[*].snippet` and URLs.
-
----
+--
 
 ## Good test questions
 
